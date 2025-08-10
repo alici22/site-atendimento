@@ -1,0 +1,304 @@
+import zipfile
+import os
+
+base_folder = "/mnt/data/site_simples_atendimento"
+
+if os.path.exists(base_folder):
+    import shutil
+    shutil.rmtree(base_folder)
+os.makedirs(base_folder, exist_ok=True)
+
+# index.html
+index_html = """
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Atendimento Simples</title>
+<style>
+  body { font-family: Arial, sans-serif; margin: 0; padding: 0; background: #f7f9fc; }
+  header { background: #007acc; color: white; padding: 1rem; text-align: center; }
+  nav { background: #005a9e; display: flex; justify-content: center; }
+  nav button { background: none; border: none; color: white; padding: 1rem 2rem; cursor: pointer; font-size: 1rem; }
+  nav button:hover, nav button.active { background: #003d66; }
+  main { padding: 1rem; max-width: 900px; margin: auto; }
+  section { display: none; }
+  section.active { display: block; }
+  label { display: block; margin-top: 1rem; }
+  input, textarea { width: 100%; padding: 0.5rem; margin-top: 0.2rem; border: 1px solid #ccc; border-radius: 4px; }
+  button.submit { margin-top: 1rem; background: #007acc; color: white; border: none; padding: 0.7rem 1.5rem; cursor: pointer; border-radius: 4px; }
+  button.submit:hover { background: #005a9e; }
+  table { width: 100%; border-collapse: collapse; margin-top: 1rem; }
+  th, td { border: 1px solid #ddd; padding: 0.5rem; text-align: left; }
+  th { background: #f0f0f0; }
+  @media (max-width: 600px) {
+    nav { flex-direction: column; }
+    nav button { width: 100%; }
+  }
+</style>
+</head>
+<body>
+
+<header>
+  <h1>Atendimento Simples</h1>
+</header>
+
+<nav>
+  <button id="btn-cadastro" class="active">Cadastro</button>
+  <button id="btn-agenda">Agenda</button>
+  <button id="btn-prontuario">Prontuário</button>
+</nav>
+
+<main>
+  <section id="cadastro" class="active">
+    <h2>Cadastro de Paciente</h2>
+    <form id="form-cadastro">
+      <label for="nome">Nome:</label>
+      <input type="text" id="nome" name="nome" required />
+      
+      <label for="dataNascimento">Data de Nascimento:</label>
+      <input type="date" id="dataNascimento" name="dataNascimento" required />
+      
+      <label for="contato">Contato:</label>
+      <input type="text" id="contato" name="contato" required />
+      
+      <label for="historico">Histórico:</label>
+      <textarea id="historico" name="historico" rows="4"></textarea>
+      
+      <button type="submit" class="submit">Salvar Paciente</button>
+    </form>
+    <h3>Pacientes Cadastrados</h3>
+    <table id="tabela-pacientes">
+      <thead><tr><th>Nome</th><th>Data Nasc.</th><th>Contato</th></tr></thead>
+      <tbody></tbody>
+    </table>
+  </section>
+  
+  <section id="agenda">
+    <h2>Agenda de Consultas</h2>
+    <form id="form-agenda">
+      <label for="pacienteSelect">Paciente:</label>
+      <select id="pacienteSelect" required></select>
+      
+      <label for="dataConsulta">Data da Consulta:</label>
+      <input type="date" id="dataConsulta" required />
+      
+      <label for="horaConsulta">Hora:</label>
+      <input type="time" id="horaConsulta" required />
+      
+      <button type="submit" class="submit">Agendar Consulta</button>
+    </form>
+    <h3>Consultas Agendadas</h3>
+    <table id="tabela-consultas">
+      <thead><tr><th>Paciente</th><th>Data</th><th>Hora</th></tr></thead>
+      <tbody></tbody>
+    </table>
+  </section>
+  
+  <section id="prontuario">
+    <h2>Prontuário</h2>
+    <form id="form-prontuario">
+      <label for="prontuarioPacienteSelect">Paciente:</label>
+      <select id="prontuarioPacienteSelect" required></select>
+      
+      <label for="anotacoes">Anotações:</label>
+      <textarea id="anotacoes" rows="5" required></textarea>
+      
+      <button type="submit" class="submit">Salvar Anotação</button>
+    </form>
+    <h3>Anotações do Paciente</h3>
+    <table id="tabela-anotacoes">
+      <thead><tr><th>Paciente</th><th>Data</th><th>Anotação</th></tr></thead>
+      <tbody></tbody>
+    </table>
+  </section>
+</main>
+
+<script>
+const btnCadastro = document.getElementById('btn-cadastro');
+const btnAgenda = document.getElementById('btn-agenda');
+const btnProntuario = document.getElementById('btn-prontuario');
+const secCadastro = document.getElementById('cadastro');
+const secAgenda = document.getElementById('agenda');
+const secProntuario = document.getElementById('prontuario');
+
+function ativarSecao(secativa, btnativo) {
+  [secCadastro, secAgenda, secProntuario].forEach(s => s.classList.remove('active'));
+  [btnCadastro, btnAgenda, btnProntuario].forEach(b => b.classList.remove('active'));
+  secativa.classList.add('active');
+  btnativo.classList.add('active');
+}
+btnCadastro.onclick = () => ativarSecao(secCadastro, btnCadastro);
+btnAgenda.onclick = () => {
+  preencherPacientesSelect('pacienteSelect');
+  ativarSecao(secAgenda, btnAgenda);
+};
+btnProntuario.onclick = () => {
+  preencherPacientesSelect('prontuarioPacienteSelect');
+  ativarSecao(secProntuario, btnProntuario);
+};
+
+// LocalStorage keys
+const pacientesKey = 'pacientes_atendimento';
+const consultasKey = 'consultas_atendimento';
+const anotacoesKey = 'anotacoes_atendimento';
+
+// Carregar pacientes do localStorage
+function carregarPacientes() {
+  const pacs = localStorage.getItem(pacientesKey);
+  return pacs ? JSON.parse(pacs) : [];
+}
+
+// Salvar pacientes no localStorage
+function salvarPacientes(pacientes) {
+  localStorage.setItem(pacientesKey, JSON.stringify(pacientes));
+}
+
+// Atualizar tabela pacientes
+function atualizarTabelaPacientes() {
+  const pacientes = carregarPacientes();
+  const tbody = document.querySelector('#tabela-pacientes tbody');
+  tbody.innerHTML = '';
+  pacientes.forEach(p => {
+    const tr = document.createElement('tr');
+    tr.innerHTML = `<td>${p.nome}</td><td>${p.dataNascimento}</td><td>${p.contato}</td>`;
+    tbody.appendChild(tr);
+  });
+}
+
+// Preencher select pacientes
+function preencherPacientesSelect(idSelect) {
+  const pacientes = carregarPacientes();
+  const select = document.getElementById(idSelect);
+  select.innerHTML = '<option value="">Selecione</option>';
+  pacientes.forEach((p, i) => {
+    const option = document.createElement('option');
+    option.value = i;
+    option.textContent = p.nome;
+    select.appendChild(option);
+  });
+}
+
+// Form cadastro paciente
+document.getElementById('form-cadastro').addEventListener('submit', e => {
+  e.preventDefault();
+  const nome = e.target.nome.value.trim();
+  const dataNascimento = e.target.dataNascimento.value;
+  const contato = e.target.contato.value.trim();
+  const historico = e.target.historico.value.trim();
+  if (!nome || !dataNascimento || !contato) {
+    alert('Preencha os campos obrigatórios!');
+    return;
+  }
+  const pacientes = carregarPacientes();
+  pacientes.push({ nome, dataNascimento, contato, historico });
+  salvarPacientes(pacientes);
+  atualizarTabelaPacientes();
+  e.target.reset();
+  alert('Paciente cadastrado com sucesso!');
+});
+
+// Inicializa tabela ao carregar página
+atualizarTabelaPacientes();
+
+// Agenda
+function carregarConsultas() {
+  const cons = localStorage.getItem(consultasKey);
+  return cons ? JSON.parse(cons) : [];
+}
+
+function salvarConsultas(consultas) {
+  localStorage.setItem(consultasKey, JSON.stringify(consultas));
+}
+
+function atualizarTabelaConsultas() {
+  const consultas = carregarConsultas();
+  const pacientes = carregarPacientes();
+  const tbody = document.querySelector('#tabela-consultas tbody');
+  tbody.innerHTML = '';
+  consultas.forEach(c => {
+    const pacienteNome = pacientes[c.pacienteIndex] ? pacientes[c.pacienteIndex].nome : 'Paciente removido';
+    const tr = document.createElement('tr');
+    tr.innerHTML = `<td>${pacienteNome}</td><td>${c.dataConsulta}</td><td>${c.horaConsulta}</td>`;
+    tbody.appendChild(tr);
+  });
+}
+
+document.getElementById('form-agenda').addEventListener('submit', e => {
+  e.preventDefault();
+  const pacienteIndex = parseInt(e.target.pacienteSelect.value);
+  const dataConsulta = e.target.dataConsulta.value;
+  const horaConsulta = e.target.horaConsulta.value;
+  if (isNaN(pacienteIndex) || !dataConsulta || !horaConsulta) {
+    alert('Preencha todos os campos da agenda!');
+    return;
+  }
+  const consultas = carregarConsultas();
+  consultas.push({ pacienteIndex, dataConsulta, horaConsulta });
+  salvarConsultas(consultas);
+  atualizarTabelaConsultas();
+  e.target.reset();
+  alert('Consulta agendada!');
+});
+
+// Inicializa tabela consultas
+atualizarTabelaConsultas();
+
+// Prontuário
+function carregarAnotacoes() {
+  const notas = localStorage.getItem(anotacoesKey);
+  return notas ? JSON.parse(notas) : [];
+}
+
+function salvarAnotacoes(anotacoes) {
+  localStorage.setItem(anotacoesKey, JSON.stringify(anotacoes));
+}
+
+function atualizarTabelaAnotacoes() {
+  const anotacoes = carregarAnotacoes();
+  const pacientes = carregarPacientes();
+  const tbody = document.querySelector('#tabela-anotacoes tbody');
+  tbody.innerHTML = '';
+  anotacoes.forEach(a => {
+    const pacienteNome = pacientes[a.pacienteIndex] ? pacientes[a.pacienteIndex].nome : 'Paciente removido';
+    const tr = document.createElement('tr');
+    tr.innerHTML = `<td>${pacienteNome}</td><td>${a.data}</td><td>${a.texto}</td>`;
+    tbody.appendChild(tr);
+  });
+}
+
+document.getElementById('form-prontuario').addEventListener('submit', e => {
+  e.preventDefault();
+  const pacienteIndex = parseInt(e.target.prontuarioPacienteSelect.value);
+  const texto = e.target.anotacoes.value.trim();
+  if (isNaN(pacienteIndex) || !texto) {
+    alert('Selecione um paciente e escreva uma anotação!');
+    return;
+  }
+  const anotacoes = carregarAnotacoes();
+  const dataAtual = new Date().toLocaleString();
+  anotacoes.push({ pacienteIndex, texto, data: dataAtual });
+  salvarAnotacoes(anotacoes);
+  atualizarTabelaAnotacoes();
+  e.target.reset();
+  alert('Anotação salva!');
+});
+
+// Inicializa tabela anotacoes
+atualizarTabelaAnotacoes();
+</script>
+
+</body>
+</html>
+"""
+
+with open(os.path.join(base_folder, "index.html"), "w", encoding="utf-8") as f:
+    f.write(index_html)
+
+# Criar ZIP
+zip_path = "/mnt/data/site_simples_atendimento.zip"
+with zipfile.ZipFile(zip_path, "w") as zipf:
+    zipf.write(os.path.join(base_folder, "index.html"), "index.html")
+
+zip_path
